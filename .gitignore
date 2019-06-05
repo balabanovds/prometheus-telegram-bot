@@ -1,4 +1,5 @@
 .vscode
-*.yml
+.idea
+config.yml
 *.key
 *.pem

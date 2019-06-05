@@ -10,12 +10,7 @@ import (
 )
 
 func main() {
-	exec, err := os.Executable()
-	if err != nil {
-		log.Fatalf("%v", err)
-	}
-
-	util.Init(filepath.Dir(exec))
+	util.Init()
 
 	bot, err := telegram.NewBot()
 	if err != nil {

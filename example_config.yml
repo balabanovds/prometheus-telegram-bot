@@ -1,0 +1,20 @@
+telegram:
+  token:        123456789:OHHYEAHHTHEBESTTOKENEVER
+  cert:         public.pem
+  key:          private.key
+  webhook-url:  https://www.google.com:8443/
+  chats:
+    - 123
+    - 456
+tor:
+  http-proxy:   http://localhost:8118/
+  socks-proxy:  http://localhost:9050/
+prometheus:
+  api-url:      http://localhost:9090/api/v1/
+  qeuries: 
+    # filesystem free percent
+    - name:   fs-free
+      query:  100-node_filesystem_free_bytes/node_filesystem_size_bytes*100
+service:
+  http-addr:    0.0.0.0:8480
+  tls-addr:     0.0.0.0:8443

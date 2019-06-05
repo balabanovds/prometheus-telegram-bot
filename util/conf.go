@@ -3,6 +3,7 @@ package util
 import (
 	"io/ioutil"
 	"log"
+	"os"
 	"path/filepath"
 
 	"gopkg.in/yaml.v2"
@@ -34,6 +35,7 @@ type config struct {
 	} `yaml:"service"`
 }
 
+// Query basic struct
 type Query struct {
 	Name  string `yaml:"name"`
 	Query string `yaml:"query"`
@@ -45,9 +47,15 @@ var (
 )
 
 // Init reads config
-func Init(baseDir string) {
-	data, err := ioutil.ReadFile(filepath.Join(baseDir, "config.yml"))
-	// data, err := ioutil.ReadFile("config.yml")
+func Init() {
+	exec, err := os.Executable()
+	if err != nil {
+		log.Fatalf("%v", err)
+	}
+	baseDir := filepath.Dir(exec)
+	log.Println(baseDir)
+	// data, err := ioutil.ReadFile(filepath.Join(baseDir, "config.yml"))
+	data, err := ioutil.ReadFile("/home/dbalaban/projects/pointer/prometheus-telegram-bot/config.yml")
 	if err != nil {
 		log.Fatalf("ReadFile() config err %v", err)
 	}

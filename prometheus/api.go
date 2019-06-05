@@ -1,6 +1,8 @@
 package prometheus
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -29,14 +31,16 @@ type prometheusAPIResponse struct {
 	Status string `json:"status"`
 }
 
+// Response is final response from API
 type Response struct {
-	APIResponse prometheusAPIResponse
-	Name        string
+	APIResponse *prometheusAPIResponse
+	Query       *u.Query
 	Err         error
 }
 
-func GetAllAPIResponses() []Response {
-	var responses []Response
+// FetchAll requests all queries from config
+func FetchAll() []*Response {
+	var responses []*Response
 
 	queries := u.Cfg.Prometheus.Queries
 
@@ -46,18 +50,45 @@ func GetAllAPIResponses() []Response {
 	for _, q := range queries {
 		go func(q u.Query) {
 			defer wg.Done()
+
 			var sb strings.Builder
 			sb.WriteString(u.Cfg.Prometheus.API)
 			sb.WriteString(`query?query=`)
 			sb.WriteString(q.Query)
+			res, err := getAPIResponse(sb.String())
 
-			res, err := http.Get(sb.String())
-			if err != nil {
-				responses = append(response
+			resp := Response{
+				Query: &q,
 			}
+
+			if err != nil {
+				resp.Err = err
+			} else {
+				resp.APIResponse = res
+			}
+
+			responses = append(responses, &resp)
 
 		}(q)
 	}
-
+	wg.Wait()
 	return responses
+}
+
+func getAPIResponse(url string) (*prometheusAPIResponse, error) {
+	res, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+
+	if res.StatusCode != 200 {
+		return nil, fmt.Errorf("Status %v", res.StatusCode)
+	}
+
+	var resp prometheusAPIResponse
+	if err := json.NewDecoder(res.Body).Decode(&resp); err != nil {
+		return nil, err
+	}
+
+	return &resp, nil
 }

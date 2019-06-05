@@ -1,0 +1,68 @@
+{
+  "query": "http://localhost:9090/api/v1/query?query=100-node_filesystem_free_bytes/node_filesystem_size_bytes*100"
+}
+
+{
+  "status": "success",
+  "data": {
+    "resultType": "vector",
+    "result": [
+      {
+        "metric": {
+          "device": "/dev/mapper/kubuntu--vg-root",
+          "fstype": "ext4",
+          "instance": "node-exporter:9100",
+          "job": "node",
+          "mountpoint": "/"
+        },
+        "value": [
+          1559742201.246,
+          "64.90464398529816"
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "status": "success",
+  "data": {
+    "resultType": "vector",
+    "result": [
+      {
+        "metric": {
+          "__name__": "node_boot_time_seconds",
+          "instance": "node-exporter:9100",
+          "job": "node"
+        },
+        "value": [
+          1559744357.058,
+          "1559110635"
+        ]
+      }
+    ]
+  }
+}
+
+{
+  "status": "success",
+  "data": {
+    "resultType": "vector",
+    "result": [
+      {
+        "metric": {
+          "__name__": "node_filesystem_avail_bytes",
+          "device": "/dev/mapper/kubuntu--vg-root",
+          "fstype": "ext4",
+          "instance": "node-exporter:9100",
+          "job": "node",
+          "mountpoint": "/"
+        },
+        "value": [
+          1559744531.804,
+          "150183309312"
+        ]
+      }
+    ]
+  }
+}

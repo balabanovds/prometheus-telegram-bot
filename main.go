@@ -2,32 +2,26 @@ package main
 
 import (
 	"log"
-	"net/http"
-	"net/url"
+	"os"
+	"path/filepath"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"github.com/balabanovds/prometheus-telegram-bot/telegram"
+	"github.com/balabanovds/prometheus-telegram-bot/util"
 )
 
 func main() {
-
-	proxyURL, err := url.Parse("http://localhost:8118")
+	exec, err := os.Executable()
 	if err != nil {
-		log.Panic(err)
+		log.Fatalf("%v", err)
 	}
 
-	transport := &http.Transport{
-		Proxy: http.ProxyURL(proxyURL),
-	}
+	util.Init(filepath.Dir(exec))
 
-	client := &http.Client{
-		Transport: transport,
-	}
-
-	bot, err := tgbotapi.NewBotAPIWithClient("888291143:AAHN1aw2jFZWFRKwPcZ2D9fTHe28cQcBh08", client)
+	bot, err := telegram.NewBot()
 	if err != nil {
-		log.Panic(err)
+		panic(err)
 	}
 
-	bot.Debug = true
-	log.Printf("Authorized on account %s", bot.Self.UserName)
+	bot.Run()
+
 }

@@ -1,0 +1,360 @@
+package prometheus
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/dustin/go-humanize"
+)
+
+var (
+	errPrometheusStatusNotOK        = errors.New("Prometheus API: status code != 200")
+	errPrometheusInvalidValue       = errors.New("Prometheus API: Invalid value format")
+	errPrometheusInvalidAPIResponse = errors.New("Prometheus API: Invalid API response")
+)
+
+type BotCommand interface {
+	MakeResponseMessage(opts ...interface{}) (string, error)
+}
+
+type TickerBotCommand struct {
+	command BotCommand
+	ticker  *time.Ticker
+}
+
+type CommandRegister struct {
+	keyCommands    map[string]BotCommand
+	tickerCommands []*TickerBotCommand
+	botNickname    string
+	defaultCommand BotCommand
+}
+
+func NewCommandRegister(nickname string, command BotCommand) *CommandRegister {
+	register := &CommandRegister{botNickname: nickname, defaultCommand: command}
+	register.keyCommands = make(map[string]BotCommand)
+	register.tickerCommands = make([]*TickerBotCommand, 0)
+	return register
+}
+
+func (c *CommandRegister) AddCommand(key string, command BotCommand) {
+	c.keyCommands[key] = command
+}
+
+func (c *CommandRegister) AddTickerCommand(command BotCommand, ticker *time.Ticker) {
+	c.tickerCommands = append(c.tickerCommands, &TickerBotCommand{command, ticker})
+}
+
+func (c *CommandRegister) GetCommand(key string) BotCommand {
+	result := strings.Split(key, "@")
+	if len(result) == 2 && result[1] == c.botNickname {
+		key = result[0]
+	}
+
+	command, ok := c.keyCommands[key]
+	if !ok {
+		return c.defaultCommand
+	}
+	return command
+}
+
+type Default struct{}
+
+func NewDefaultCommand() *Default {
+	return &Default{}
+}
+
+func (command *Default) MakeResponseMessage(opts ...interface{}) (string, error) {
+	return "Unknown command\n", nil
+}
+
+type Status struct {
+	PrometheusAPIURL string
+}
+
+func NewStatusCommand(prometheusAPIURL string) *Status {
+	return &Status{PrometheusAPIURL: prometheusAPIURL}
+}
+
+func (s *Status) MakeResponseMessage(opt ...interface{}) (string, error) {
+	var resultMessages []string
+	var errstrings []string
+	var err error
+
+	msg, err := checkPrometheusDiskUsageAPI(s.PrometheusAPIURL + PrometheusAPIDiskUsageEndpoint)
+	if err != nil {
+		errstrings = append(errstrings, err.Error())
+	}
+	resultMessages = append(resultMessages, msg)
+
+	msg, err = checkPrometheusClickhouseAPI(s.PrometheusAPIURL + PrometheusAPIClickhouseEndpoint)
+	if err != nil {
+		errstrings = append(errstrings, err.Error())
+	}
+	resultMessages = append(resultMessages, msg)
+
+	msg, err = checkPrometheusProbeAPI(s.PrometheusAPIURL + PrometheusAPIProbeHTTPEndpoint)
+	if err != nil {
+		errstrings = append(errstrings, err.Error())
+	}
+	resultMessages = append(resultMessages, msg)
+
+	msg, err = checkPrometheusNginxAPI(s.PrometheusAPIURL + PrometheusAPINginxConnectionsEndpoint)
+	if err != nil {
+		errstrings = append(errstrings, err.Error())
+	}
+	resultMessages = append(resultMessages, msg)
+
+	msg, err = checkPrometheusHAProxyAPI(s.PrometheusAPIURL+PrometheusAPIHAProxyBytesInEndpoint, s.PrometheusAPIURL+PrometheusAPIHAProxyBytesOutEndpoint)
+	if err != nil {
+		errstrings = append(errstrings, err.Error())
+	}
+	resultMessages = append(resultMessages, msg)
+
+	msg, err = checkPrometheusNodeUptimeAPI(s.PrometheusAPIURL + PrometheusAPINodeUptimeEndpoint)
+	if err != nil {
+		errstrings = append(errstrings, err.Error())
+	}
+	resultMessages = append(resultMessages, msg)
+
+	if len(errstrings) > 0 {
+		err = fmt.Errorf(strings.Join(errstrings, "\n"))
+	}
+
+	return strings.Join(resultMessages, "\n"), err
+}
+
+func checkPrometheusDiskUsageAPI(url string) (string, error) {
+	var buf bytes.Buffer
+	buf.WriteString("<b>Free Disk Space:</b>\n")
+
+	resp, err := getPrometheusAPIResponse(url)
+	if err != nil {
+		buf.WriteString(err.Error())
+		return buf.String(), err
+	}
+
+	for _, result := range resp.Data.Result {
+		if len(result.Value) < 2 {
+			buf.WriteString(errPrometheusInvalidValue.Error())
+			return buf.String(), errPrometheusInvalidValue
+		}
+
+		valstr, _ := result.Value[1].(string)
+		val, err := strconv.ParseFloat(valstr, 64)
+		if err != nil {
+			buf.WriteString(errPrometheusInvalidValue.Error())
+			return buf.String(), err
+		}
+
+		msg := fmt.Sprintf("<code>%v</code> — %.2f%s\n", result.Metric.Instance, val, "%")
+		buf.WriteString(msg)
+	}
+
+	return buf.String(), nil
+}
+
+func checkPrometheusClickhouseAPI(url string) (string, error) {
+	var buf bytes.Buffer
+	buf.WriteString("<b>Clickhouse rows inserted for 5m:</b>\n")
+
+	resp, err := getPrometheusAPIResponse(url)
+	if err != nil {
+		buf.WriteString(err.Error())
+		return buf.String(), err
+	}
+
+	for _, result := range resp.Data.Result {
+		if len(result.Value) < 2 {
+			buf.WriteString(errPrometheusInvalidValue.Error())
+			return buf.String(), errPrometheusInvalidValue
+		}
+
+		msg := fmt.Sprintf("<code>%v</code> — %v\n", result.Metric.Instance, result.Value[1])
+		buf.WriteString(msg)
+	}
+
+	return buf.String(), nil
+}
+
+func checkPrometheusProbeAPI(url string) (string, error) {
+	var buf bytes.Buffer
+	buf.WriteString("<b>API Health:</b>\n")
+
+	resp, err := getPrometheusAPIResponse(url)
+	if err != nil {
+		buf.WriteString(err.Error())
+		return buf.String(), err
+	}
+
+	for _, result := range resp.Data.Result {
+		if len(result.Value) < 2 {
+			buf.WriteString(errPrometheusInvalidValue.Error())
+			return buf.String(), errPrometheusInvalidValue
+		}
+
+		msg := fmt.Sprintf("<code>%v</code>\nstatus: %v\n", result.Metric.Instance, result.Value[1])
+		buf.WriteString(msg)
+	}
+
+	return buf.String(), nil
+}
+
+func checkPrometheusNginxAPI(url string) (b string, e error) {
+	var buf bytes.Buffer
+	buf.WriteString("<b>nginx:</b>\n")
+	buf.WriteString("connections_current (for last 20s):\n")
+
+	defer func() {
+		if r := recover(); r != nil {
+			e = errors.New(fmt.Sprintln(r))
+			buf.WriteString(e.Error())
+			b = buf.String()
+		}
+	}()
+
+	resp, err := getPrometheusAPIResponse(url)
+	if err != nil {
+		buf.WriteString(err.Error())
+		return buf.String(), err
+	}
+
+	result := resp.Data.Result
+
+	// API returns 4 nginx states for each instance
+	// with array like [{instance: url:9113, state: active}, {instance: url:9113, state: reading}...]
+	if len(result)%4 != 0 {
+		buf.WriteString(errPrometheusInvalidAPIResponse.Error())
+		return buf.String(), errPrometheusInvalidAPIResponse
+	}
+
+	for i := 0; i != len(result); i += 4 {
+		if len(result[i].Value) < 2 {
+			buf.WriteString(errPrometheusInvalidValue.Error())
+			return buf.String(), errPrometheusInvalidValue
+		}
+
+		buf.WriteString(fmt.Sprintf("<code>%v</code>\n", result[i].Metric.Instance))
+
+		s1, s2, s3, s4 := result[i].Metric.State, result[i+1].Metric.State, result[i+2].Metric.State, result[i+3].Metric.State
+		v1, v2, v3, v4 := result[i].Value[1], result[i+1].Value[1], result[i+2].Value[1], result[i+3].Value[1]
+
+		msg := fmt.Sprintf("%v: %v, %v: %v, %v: %v, %v: %v\n", s1, v1, s2, v2, s3, v3, s4, v4)
+		buf.WriteString(msg)
+	}
+
+	return buf.String(), e
+}
+
+func checkPrometheusHAProxyAPI(inURL string, outURL string) (string, error) {
+	var buf bytes.Buffer
+	buf.WriteString("<b>HAProxy:</b>\n")
+
+	respIn, err := getPrometheusAPIResponse(inURL)
+	if err != nil {
+		buf.WriteString(err.Error())
+		return buf.String(), err
+	}
+
+	respOut, err := getPrometheusAPIResponse(outURL)
+	if err != nil {
+		buf.WriteString(err.Error())
+		return buf.String(), err
+	}
+
+	buf.WriteString("server_bytes_in_total (RPS for last 5m): \n")
+	for _, result := range respIn.Data.Result {
+		if len(result.Value) < 2 {
+			buf.WriteString(errPrometheusInvalidValue.Error())
+			return buf.String(), errPrometheusInvalidValue
+		}
+
+		valstr, _ := result.Value[1].(string)
+
+		val, err := strconv.ParseFloat(valstr, 64)
+		if err != nil {
+			buf.WriteString(errPrometheusInvalidValue.Error())
+			return buf.String(), err
+		}
+
+		server := result.Metric.Server // like "private1" or "private2"
+
+		msg := fmt.Sprintf("<code>%v</code>: %v - %v\n", result.Metric.Instance, "api"+server[len(server)-1:], humanize.Bytes(uint64(val)))
+		buf.WriteString(msg)
+	}
+
+	buf.WriteString("server_bytes_out_total (RPS for last 5m): \n")
+	for _, result := range respOut.Data.Result {
+		if len(result.Value) < 2 {
+			buf.WriteString(errPrometheusInvalidValue.Error())
+			return buf.String(), errPrometheusInvalidValue
+		}
+
+		valstr, _ := result.Value[1].(string)
+
+		val, err := strconv.ParseFloat(valstr, 64)
+		if err != nil {
+			buf.WriteString(errPrometheusInvalidValue.Error())
+			return buf.String(), err
+		}
+
+		server := result.Metric.Server // like "private1" or "private2"
+
+		msg := fmt.Sprintf("<code>%v</code>: %v - %v\n", result.Metric.Instance, "api"+server[len(server)-1:], humanize.Bytes(uint64(val)))
+		buf.WriteString(msg)
+	}
+
+	return buf.String(), nil
+}
+
+func checkPrometheusNodeUptimeAPI(url string) (string, error) {
+	var buf bytes.Buffer
+	buf.WriteString("<b>Uptime:</b>\n")
+
+	resp, err := getPrometheusAPIResponse(url)
+	if err != nil {
+		buf.WriteString(err.Error())
+		return buf.String(), err
+	}
+
+	for _, result := range resp.Data.Result {
+		if len(result.Value) < 2 {
+			buf.WriteString(errPrometheusInvalidValue.Error())
+			return buf.String(), err
+		}
+
+		valstr, _ := result.Value[1].(string)
+		val, _ := strconv.ParseInt(valstr, 10, 64)
+		t := time.Unix(val, 0)
+
+		uptime := t.Format(time.RFC822)
+
+		msg := fmt.Sprintf("<code>%v</code>:\n%v\n", result.Metric.Instance, uptime)
+		buf.WriteString(msg)
+	}
+
+	return buf.String(), nil
+}
+
+func getPrometheusAPIResponse(url string) (*PrometheusAPIResponse, error) {
+	r, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+
+	if r.StatusCode != 200 {
+		return nil, errPrometheusStatusNotOK
+	}
+
+	var resp PrometheusAPIResponse
+	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
+		return nil, err
+	}
+
+	return &resp, nil
+}
